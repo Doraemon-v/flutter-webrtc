@@ -1,5 +1,6 @@
 #include "flutter_webrtc/flutter_web_r_t_c_plugin.h"
 
+#include "audio_manager.h"
 #include "flutter_common.h"
 #include "flutter_webrtc.h"
 #include "task_runner_windows.h"
@@ -81,4 +82,8 @@ void FlutterWebRTCPluginRegisterWithRegistrar(
 
 flutter_webrtc_plugin::FlutterWebRTC* FlutterWebRTCPluginSharedInstance() {
   return g_shared_instance;
+}
+
+flutter_webrtc_plugin::AudioManager* FlutterWebRTCAudioManagerSharedInstance() {
+  return flutter_webrtc_plugin::AudioManager::sharedInstance();
 } 

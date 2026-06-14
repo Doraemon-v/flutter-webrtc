@@ -17,6 +17,8 @@ add_definitions(-DLIB_WEBRTC_API_DLL)
 add_definitions(-DRTC_DESKTOP_DEVICE)
 
 add_library(${PLUGIN_NAME} SHARED
+  "../common/cpp/src/audio_manager.cc"
+  "../common/cpp/src/audio_processing_adapter.cc"
   "../common/cpp/src/flutter_common.cc"
   "../common/cpp/src/flutter_data_channel.cc"
   "../common/cpp/src/flutter_data_packet_cryptor.cc"

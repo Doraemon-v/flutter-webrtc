@@ -11,6 +11,7 @@
 
 namespace flutter_webrtc_plugin {
 class FlutterWebRTC;
+class AudioManager;
 }  // namespace flutter_webrtc_plugin
 
 #if defined(__cplusplus)
@@ -21,6 +22,8 @@ FLUTTER_PLUGIN_EXPORT void FlutterWebRTCPluginRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar);
 
 FLUTTER_PLUGIN_EXPORT flutter_webrtc_plugin::FlutterWebRTC* FlutterWebRTCPluginSharedInstance();
+
+FLUTTER_PLUGIN_EXPORT flutter_webrtc_plugin::AudioManager* FlutterWebRTCAudioManagerSharedInstance();
 
 #if defined(__cplusplus)
 }  // extern "C"

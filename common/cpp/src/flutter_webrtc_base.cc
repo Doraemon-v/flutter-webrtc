@@ -1,5 +1,6 @@
 #include "flutter_webrtc_base.h"
 
+#include "audio_manager.h"
 #include "flutter_data_channel.h"
 #include "flutter_peerconnection.h"
 
@@ -20,6 +21,7 @@ FlutterWebRTCBase::FlutterWebRTCBase(BinaryMessenger* messenger,
   video_device_ = factory_->GetVideoDevice();
   desktop_device_ = factory_->GetDesktopDevice();
   audio_processing_ = factory_->GetAudioProcessing();
+  AudioManager::sharedInstance()->AttachToAudioProcessing(audio_processing_);
   event_channel_ = EventChannelProxy::Create(messenger_, task_runner_, kEventChannelName);
 }
 
