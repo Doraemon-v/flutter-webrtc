@@ -15,7 +15,7 @@ A new flutter plugin project.
   s.source_files     = ['Classes/**/*']
 
   s.dependency 'FlutterMacOS'
-  s.weak_frameworks = 'ScreenCaptureKit'
+  s.weak_frameworks = 'ScreenCaptureKit', 'Vision'
   s.dependency 'WebRTC-SDK', '144.7559.01'
   s.osx.deployment_target = '10.15'
 end

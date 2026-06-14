@@ -33,6 +33,7 @@
 
 - (void)startCaptureWithFPS:(NSInteger)fps
                    sourceId:(NSString* _Nullable)sourceId
+                 sourceType:(NSString* _Nullable)sourceType
                   onStarted:(void (^)(NSError * _Nullable error))onStarted {
 #if __has_include(<ScreenCaptureKit/ScreenCaptureKit.h>)
   if (@available(macOS 12.3, *)) {
@@ -42,19 +43,36 @@
         return;
       }
 
-      SCDisplay *display = [self selectDisplayFromContent:content sourceId:sourceId];
-      if (display == nil) {
-        NSError *noDisplay = [NSError errorWithDomain:@"FlutterScreenCaptureKit"
-                                                 code:-1
-                                             userInfo:@{NSLocalizedDescriptionKey: @"No matching display"}];
-        onStarted(noDisplay);
-        return;
+      SCWindow *window = nil;
+      SCDisplay *display = nil;
+      SCContentFilter *filter = nil;
+      if ([sourceType isEqualToString:@"window"]) {
+        window = [self selectWindowFromContent:content sourceId:sourceId];
+        if (window == nil) {
+          NSError *noWindow = [NSError errorWithDomain:@"FlutterScreenCaptureKit"
+                                                  code:-1
+                                              userInfo:@{NSLocalizedDescriptionKey: @"No matching window"}];
+          onStarted(noWindow);
+          return;
+        }
+        filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
+      } else {
+        display = [self selectDisplayFromContent:content sourceId:sourceId];
+        if (display == nil) {
+          NSError *noDisplay = [NSError errorWithDomain:@"FlutterScreenCaptureKit"
+                                                   code:-1
+                                               userInfo:@{NSLocalizedDescriptionKey: @"No matching display"}];
+          onStarted(noDisplay);
+          return;
+        }
+        filter = [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
       }
 
-      SCContentFilter *filter = [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
       SCStreamConfiguration *config = [SCStreamConfiguration new];
-      config.width = display.width;
-      config.height = display.height;
+      CGSize captureSize = window != nil ? window.frame.size : CGSizeMake(display.width, display.height);
+      CGFloat scale = window != nil ? [self backingScaleForWindow:window] : 1.0;
+      config.width = (size_t)MAX(1, ceil(captureSize.width * scale));
+      config.height = (size_t)MAX(1, ceil(captureSize.height * scale));
       config.minimumFrameInterval = CMTimeMake(1, (int32_t)MAX(1, fps));
       config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
       if (@available(macOS 13.0, *)) {
@@ -127,6 +145,30 @@
   }
 
   return content.displays.firstObject;
+}
+
+- (SCWindow *)selectWindowFromContent:(SCShareableContent *)content
+                             sourceId:(NSString *)sourceId API_AVAILABLE(macos(12.3)) {
+  if (sourceId != nil && sourceId.length > 0) {
+    CGWindowID windowId = (CGWindowID)[sourceId longLongValue];
+    for (SCWindow *window in content.windows) {
+      if (window.windowID == windowId) {
+        return window;
+      }
+    }
+  }
+
+  return nil;
+}
+
+- (CGFloat)backingScaleForWindow:(SCWindow *)window API_AVAILABLE(macos(12.3)) {
+  CGPoint center = CGPointMake(CGRectGetMidX(window.frame), CGRectGetMidY(window.frame));
+  for (NSScreen *screen in NSScreen.screens) {
+    if (NSPointInRect(center, screen.frame)) {
+      return MAX(1.0, screen.backingScaleFactor);
+    }
+  }
+  return MAX(1.0, NSScreen.mainScreen.backingScaleFactor);
 }
 
 - (void)stream:(SCStream *)stream

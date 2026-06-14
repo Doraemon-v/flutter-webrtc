@@ -7,6 +7,7 @@
 
 - (void)startCaptureWithFPS:(NSInteger)fps
                    sourceId:(NSString* _Nullable)sourceId
+                 sourceType:(NSString* _Nullable)sourceType
                   onStarted:(void (^)(NSError * _Nullable error))onStarted;
 
 - (void)stopCaptureWithCompletion:(void (^)(void))completion;
