@@ -3,6 +3,78 @@
 
 #include "flutter_webrtc/flutter_web_r_t_c_plugin.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
+
+// Simple waveOut-based audio sink that bypasses WebRTC ADM playout
+class WaveOutAudioSink : public libwebrtc::AudioTrackSink {
+ public:
+  WaveOutAudioSink() : hwo_(nullptr), initialized_(false) {}
+  ~WaveOutAudioSink() override {
+    if (hwo_) {
+      waveOutReset(hwo_);
+      waveOutClose(hwo_);
+    }
+    for (auto& hdr : headers_) {
+      delete[] hdr.lpData;
+    }
+  }
+
+  void OnData(const void* audio_data, int bits_per_sample,
+              int sample_rate, size_t number_of_channels,
+              size_t number_of_frames) override {
+    if (!initialized_) {
+      WAVEFORMATEX wfx = {};
+      wfx.wFormatTag = WAVE_FORMAT_PCM;
+      wfx.nChannels = (WORD)number_of_channels;
+      wfx.nSamplesPerSec = sample_rate;
+      wfx.wBitsPerSample = (WORD)bits_per_sample;
+      wfx.nBlockAlign = wfx.nChannels * wfx.wBitsPerSample / 8;
+      wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+      MMRESULT res = waveOutOpen(&hwo_, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL);
+      if (res != MMSYSERR_NOERROR) {
+        OutputDebugStringA("[WaveOutSink] waveOutOpen FAILED\n");
+        return;
+      }
+      initialized_ = true;
+      OutputDebugStringA("[WaveOutSink] waveOutOpen OK\n");
+    }
+
+    size_t dataSize = number_of_frames * number_of_channels * (bits_per_sample / 8);
+    WAVEHDR hdr = {};
+    hdr.lpData = new char[dataSize];
+    memcpy(hdr.lpData, audio_data, dataSize);
+    hdr.dwBufferLength = (DWORD)dataSize;
+
+    waveOutPrepareHeader(hwo_, &hdr, sizeof(WAVEHDR));
+    waveOutWrite(hwo_, &hdr, sizeof(WAVEHDR));
+
+    // Keep track for cleanup; limit buffer queue
+    headers_.push_back(hdr);
+    // Reclaim completed buffers
+    while (headers_.size() > 32) {
+      auto& front = headers_.front();
+      if (front.dwFlags & WHDR_DONE) {
+        waveOutUnprepareHeader(hwo_, &front, sizeof(WAVEHDR));
+        delete[] front.lpData;
+        headers_.erase(headers_.begin());
+      } else {
+        break;
+      }
+    }
+  }
+
+ private:
+  HWAVEOUT hwo_;
+  bool initialized_;
+  std::vector<WAVEHDR> headers_;
+};
+
+static WaveOutAudioSink* g_waveout_sink = nullptr;
+#endif  // _WIN32
+
 namespace flutter_webrtc_plugin {
 
 static EventChannelProxy* eventChannelProxy = nullptr;
@@ -588,6 +660,13 @@ void FlutterWebRTC::HandleMethodCall(
         if (track && track->kind().std_string() == "audio") {
           auto audioTrack = static_cast<RTCAudioTrack*>(track.get());
           audioTrack->SetVolume(10.0);
+#ifdef _WIN32
+          // Attach waveOut sink to bypass ADM playout
+          if (!g_waveout_sink) {
+            g_waveout_sink = new WaveOutAudioSink();
+          }
+          audioTrack->AddSink(g_waveout_sink);
+#endif
           tracksFixed++;
         }
       }
