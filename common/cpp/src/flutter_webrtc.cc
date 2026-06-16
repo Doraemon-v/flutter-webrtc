@@ -6,12 +6,31 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <mmsystem.h>
+#include <cstdio>
 #pragma comment(lib, "winmm.lib")
 
 // Simple waveOut-based audio sink that bypasses WebRTC ADM playout
 class WaveOutAudioSink : public libwebrtc::AudioTrackSink {
  public:
-  WaveOutAudioSink() : hwo_(nullptr), initialized_(false) {}
+  WaveOutAudioSink() : hwo_(nullptr), initialized_(false), frame_count_(0) {
+    // Pre-initialize with standard WebRTC audio format
+    WAVEFORMATEX wfx = {};
+    wfx.wFormatTag = WAVE_FORMAT_PCM;
+    wfx.nChannels = 1;
+    wfx.nSamplesPerSec = 48000;
+    wfx.wBitsPerSample = 16;
+    wfx.nBlockAlign = wfx.nChannels * wfx.wBitsPerSample / 8;
+    wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+    MMRESULT res = waveOutOpen(&hwo_, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL);
+    if (res != MMSYSERR_NOERROR) {
+      fprintf(stderr, "[WaveOutSink] waveOutOpen FAILED err=%d\n", (int)res);
+      fflush(stderr);
+    } else {
+      initialized_ = true;
+      fprintf(stderr, "[WaveOutSink] waveOutOpen OK 48kHz/16bit/mono\n");
+      fflush(stderr);
+    }
+  }
   ~WaveOutAudioSink() override {
     if (hwo_) {
       waveOutReset(hwo_);
@@ -25,21 +44,43 @@ class WaveOutAudioSink : public libwebrtc::AudioTrackSink {
   void OnData(const void* audio_data, int bits_per_sample,
               int sample_rate, size_t number_of_channels,
               size_t number_of_frames) override {
-    if (!initialized_) {
-      WAVEFORMATEX wfx = {};
-      wfx.wFormatTag = WAVE_FORMAT_PCM;
-      wfx.nChannels = (WORD)number_of_channels;
-      wfx.nSamplesPerSec = sample_rate;
-      wfx.wBitsPerSample = (WORD)bits_per_sample;
-      wfx.nBlockAlign = wfx.nChannels * wfx.wBitsPerSample / 8;
-      wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
-      MMRESULT res = waveOutOpen(&hwo_, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL);
-      if (res != MMSYSERR_NOERROR) {
-        OutputDebugStringA("[WaveOutSink] waveOutOpen FAILED\n");
-        return;
+    frame_count_++;
+    if (frame_count_ == 1) {
+      fprintf(stderr, "[WaveOutSink] OnData FIRST FRAME rate=%d ch=%zu bits=%d frames=%zu\n",
+              sample_rate, number_of_channels, bits_per_sample, number_of_frames);
+      fflush(stderr);
+    }
+    if (frame_count_ % 500 == 0) {
+      fprintf(stderr, "[WaveOutSink] OnData count=%d\n", frame_count_);
+      fflush(stderr);
+    }
+
+    if (!initialized_ || !hwo_) return;
+
+    // Re-init if format changed
+    if (sample_rate != 48000 || number_of_channels != 1 || bits_per_sample != 16) {
+      if (!format_changed_) {
+        waveOutReset(hwo_);
+        waveOutClose(hwo_);
+        WAVEFORMATEX wfx = {};
+        wfx.wFormatTag = WAVE_FORMAT_PCM;
+        wfx.nChannels = (WORD)number_of_channels;
+        wfx.nSamplesPerSec = sample_rate;
+        wfx.wBitsPerSample = (WORD)bits_per_sample;
+        wfx.nBlockAlign = wfx.nChannels * wfx.wBitsPerSample / 8;
+        wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+        MMRESULT res = waveOutOpen(&hwo_, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL);
+        if (res != MMSYSERR_NOERROR) {
+          fprintf(stderr, "[WaveOutSink] reinit FAILED\n");
+          fflush(stderr);
+          initialized_ = false;
+          return;
+        }
+        fprintf(stderr, "[WaveOutSink] reinit OK rate=%d ch=%zu bits=%d\n",
+                sample_rate, number_of_channels, bits_per_sample);
+        fflush(stderr);
+        format_changed_ = true;
       }
-      initialized_ = true;
-      OutputDebugStringA("[WaveOutSink] waveOutOpen OK\n");
     }
 
     size_t dataSize = number_of_frames * number_of_channels * (bits_per_sample / 8);
@@ -53,8 +94,7 @@ class WaveOutAudioSink : public libwebrtc::AudioTrackSink {
 
     // Keep track for cleanup; limit buffer queue
     headers_.push_back(hdr);
-    // Reclaim completed buffers
-    while (headers_.size() > 32) {
+    while (headers_.size() > 64) {
       auto& front = headers_.front();
       if (front.dwFlags & WHDR_DONE) {
         waveOutUnprepareHeader(hwo_, &front, sizeof(WAVEHDR));
@@ -66,9 +106,13 @@ class WaveOutAudioSink : public libwebrtc::AudioTrackSink {
     }
   }
 
+  int frame_count() const { return frame_count_; }
+
  private:
   HWAVEOUT hwo_;
   bool initialized_;
+  bool format_changed_ = false;
+  int frame_count_;
   std::vector<WAVEHDR> headers_;
 };
 
@@ -672,6 +716,10 @@ void FlutterWebRTC::HandleMethodCall(
       }
     }
     info[EncodableValue("remoteTracksMaxVolume")] = EncodableValue(tracksFixed);
+#ifdef _WIN32
+    info[EncodableValue("waveOutInitialized")] = EncodableValue(g_waveout_sink ? g_waveout_sink->frame_count() >= 0 : false);
+    info[EncodableValue("waveOutFrames")] = EncodableValue(g_waveout_sink ? g_waveout_sink->frame_count() : -1);
+#endif
 
     result->Success(EncodableValue(info));
   } else if (method_call.method_name().compare("getLocalDescription") == 0) {
