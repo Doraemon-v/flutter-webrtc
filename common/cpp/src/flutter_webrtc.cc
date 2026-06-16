@@ -564,6 +564,38 @@ void FlutterWebRTC::HandleMethodCall(
     audioTrack->SetVolume(volume.value());
 
     result->Success();
+  } else if (method_call.method_name().compare("ensurePlayoutReady") == 0) {
+    // Diagnostic: check and fix ADM speaker volume, report playout state
+    uint32_t currentVol = 0;
+    base_->audio_device_->SpeakerVolume(currentVol);
+    // Set speaker volume to maximum (65535 is typical WASAPI max)
+    base_->audio_device_->SetSpeakerVolume(65535);
+    uint32_t afterVol = 0;
+    base_->audio_device_->SpeakerVolume(afterVol);
+
+    EncodableMap info;
+    info[EncodableValue("speakerVolumeBefore")] = EncodableValue((int64_t)currentVol);
+    info[EncodableValue("speakerVolumeAfter")] = EncodableValue((int64_t)afterVol);
+    info[EncodableValue("playoutDevices")] = EncodableValue((int64_t)base_->audio_device_->PlayoutDevices());
+
+    // Also try setting all known remote audio tracks to volume 10 (max per API doc)
+    // We use the local_tracks_ and peerconnection tracks lookup
+    int tracksFixed = 0;
+    for (auto& kv : base_->peerconnections_) {
+      auto pc = kv.second;
+      auto receivers = pc->receivers();
+      for (auto receiver : receivers.std_vector()) {
+        auto track = receiver->track();
+        if (track && track->kind().std_string() == "audio") {
+          auto audioTrack = static_cast<RTCAudioTrack*>(track.get());
+          audioTrack->SetVolume(10.0);
+          tracksFixed++;
+        }
+      }
+    }
+    info[EncodableValue("remoteTracksMaxVolume")] = EncodableValue(tracksFixed);
+
+    result->Success(EncodableValue(info));
   } else if (method_call.method_name().compare("getLocalDescription") == 0) {
     if (!method_call.arguments()) {
       result->Error("Bad Arguments", "Null constraints arguments received");
